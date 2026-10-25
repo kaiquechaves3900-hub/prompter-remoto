@@ -1,0 +1,969 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Prompter Remoto</title>
+<meta name="description" content="Teleprompter controlado por outro celular.">
+<meta name="theme-color" content="#09090b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Prompter">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=Atkinson+Hyperlegible:wght@400;700&family=Share+Tech+Mono&display=swap">
+<style>
+html{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+
+/* Layout: o controle é um painel de transporte — monitor do texto em cima (arraste para buscar), botão redondo de play com anel de tally, fader de velocidade. Tudo o mais fica nas abas. Visual único escuro, de propósito. */
+:root{
+  --bg:#09090b;
+  --panel:#121317;
+  --line:#22242a;
+  --fg:#ecebe7;
+  --muted:#7f838b;
+  --dim:#3a3d44;
+  --cue:#ffb020;
+  --live:#ff3b30;
+  --ready:#34d27b;
+  --f-ui:"Archivo","Arial Narrow",system-ui,sans-serif;
+  --f-tc:"Share Tech Mono",ui-monospace,Menlo,monospace;
+  --f-read:"Atkinson Hyperlegible",system-ui,sans-serif;
+  color-scheme:dark;
+}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-ui);font-size:15px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  -webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer;touch-action:manipulation;background:none;border:0;padding:0}
+:focus-visible{outline:2px solid var(--cue);outline-offset:2px}
+/* rótulo estilo serigrafia de equipamento: largo, caixa alta */
+.silk{font-stretch:125%;font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.tc{font-family:var(--f-tc);font-variant-numeric:tabular-nums}
+.led{width:8px;height:8px;border-radius:50%;background:var(--dim);display:inline-block;flex:none}
+.led[data-s="ready"]{background:var(--ready);box-shadow:0 0 8px var(--ready)}
+.led[data-s="cue"]{background:var(--cue);box-shadow:0 0 8px var(--cue)}
+.led[data-s="live"]{background:var(--live);box-shadow:0 0 10px var(--live)}
+
+.key{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:11px 14px;
+  font-stretch:112%;font-weight:600;font-size:13px;letter-spacing:.1em;text-transform:uppercase}
+.key:active{background:#1b1d22}
+.key:disabled{opacity:.35}
+.key.go{background:var(--cue);border-color:var(--cue);color:#1b1200}
+.key.danger{border-color:#6b1f1b;color:#ff9c95}
+.key .led{width:6px;height:6px}
+.key.on{border-color:#5c4410}
+.key.on .led{background:var(--cue);box-shadow:0 0 6px var(--cue)}
+
+/* ---------- início ---------- */
+#home{height:100%;display:grid;grid-template-rows:1fr 1fr auto;margin-inline:calc(-1*max(16px,env(safe-area-inset-left,0px))) calc(-1*max(16px,env(safe-area-inset-right,0px)))}
+.half{display:flex;flex-direction:column;justify-content:flex-end;gap:10px;text-align:left;border-bottom:1px solid var(--line);
+  padding:24px max(20px,env(safe-area-inset-right,0px)) 26px max(20px,env(safe-area-inset-left,0px));position:relative;overflow:hidden}
+.half:active{background:#101114}
+.half .silk{color:var(--cue)}
+.half b{display:block;font-stretch:62%;font-weight:800;font-size:clamp(50px,15vw,110px);line-height:.82;letter-spacing:-.01em;text-transform:uppercase}
+.half small{color:var(--muted);font-size:15px;max-width:34ch;line-height:1.4}
+/* reflexo no vidro do teleprompter */
+.fx .half b{font-size:clamp(64px,21vw,150px)}
+#goP b{position:relative;margin-bottom:.32em}
+#goP b::after{content:"Prompter";position:absolute;left:0;top:100%;transform:scaleY(-1);opacity:.1;-webkit-mask-image:linear-gradient(to top,#000,transparent 70%);mask-image:linear-gradient(to top,#000,transparent 70%)}
+#goP{padding-bottom:calc(26px + .5em)}
+.foot{margin:0;display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;line-height:1.4;padding:14px max(20px,env(safe-area-inset-right,0px)) 18px max(20px,env(safe-area-inset-left,0px))}
+
+/* ---------- prompter ---------- */
+#prompter{position:fixed;inset:0;background:#000;overflow:hidden;z-index:15}
+#stage{position:absolute;inset:0}
+#stage.mirror{transform:scaleX(-1)}
+#stage.flipv{transform:scaleY(-1)}
+#stage.mirror.flipv{transform:scale(-1,-1)}
+#scroll{position:absolute;left:0;right:0;top:0;will-change:transform;box-sizing:border-box}
+#scroll p{margin:0 0 .8em;line-height:1.36;font-family:var(--f-read);font-weight:700;overflow-wrap:break-word}
+.cue{color:var(--cue);font-weight:400;font-size:.56em;font-family:var(--f-ui);font-stretch:112%;text-transform:uppercase;letter-spacing:.1em}
+#guide{position:absolute;left:0;right:0;height:0;pointer-events:none}
+#guide::before,#guide::after{content:"";position:absolute;top:-11px;border:11px solid transparent}
+#guide::before{left:0;border-left-color:var(--cue)}
+#guide::after{right:0;border-right-color:var(--cue)}
+#count{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-stretch:62%;font-weight:800;font-size:min(50vh,64vw);color:var(--cue);pointer-events:none}
+#pTally{position:absolute;left:0;right:0;top:0;height:3px;background:var(--dim)}
+#pTally[data-s="ready"]{background:var(--ready)}
+#pTally[data-s="cue"]{background:var(--cue)}
+#pTally[data-s="live"]{background:var(--live)}
+#hud{position:absolute;left:0;right:0;top:3px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+  padding:calc(env(safe-area-inset-top,0px) + 8px) max(12px,env(safe-area-inset-right,0px)) 16px max(12px,env(safe-area-inset-left,0px));
+  background:linear-gradient(rgba(0,0,0,.9),rgba(0,0,0,0));transition:opacity .3s}
+#hud.hide{opacity:0;pointer-events:none}
+#hud .grow{flex:1;min-width:140px;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+#hud .grow b{font-family:var(--f-tc);font-weight:400;color:var(--cue);font-size:15px;letter-spacing:.08em}
+#hud .key{padding:8px 11px;font-size:12px;background:rgba(18,19,23,.9)}
+#pbar{position:absolute;left:0;bottom:0;height:2px;background:var(--cue);width:0;opacity:.7}
+#wait{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(320px,calc(100% - 32px));box-sizing:border-box;text-align:center;display:flex;flex-direction:column;gap:14px;align-items:center}
+#wait .bigcode{font-family:var(--f-tc);font-size:76px;letter-spacing:.16em;color:var(--cue);line-height:1;padding-left:.16em}
+#wait p{margin:0;color:var(--muted);line-height:1.45}
+#wait .row{display:flex;gap:8px}
+
+/* ---------- controle ---------- */
+#ctl{max-width:520px;margin:0 auto;padding-bottom:calc(24px + env(safe-area-inset-bottom,0px))}
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:6;background:var(--bg);display:flex;align-items:center;gap:10px;padding-block:12px;border-bottom:1px solid var(--line)}
+.bar .ch{font-stretch:125%;font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+.bar .ch b{font-family:var(--f-tc);font-weight:400;font-size:16px;color:var(--cue);letter-spacing:.08em}
+.bar .grow{flex:1;min-width:0;font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar .key{padding:7px 11px;font-size:11px}
+
+#pair{display:flex;flex-direction:column;gap:14px;padding-top:36px}
+#pair .codein{width:100%;box-sizing:border-box;text-align:center;font-family:var(--f-tc);font-size:64px;letter-spacing:.3em;padding:10px 0 10px .3em;background:transparent;border:0;border-bottom:2px solid var(--line);color:var(--cue);border-radius:0}
+#pair .codein:focus{border-bottom-color:var(--cue);outline:none}
+#pair .codein::placeholder{color:#26282d}
+#pair p{margin:0;color:var(--muted);font-size:14px;line-height:1.5;text-align:center}
+
+.tabs{display:flex;gap:22px;padding-top:14px;border-bottom:1px solid var(--line)}
+.tabs button{padding:6px 0 10px;font-stretch:125%;font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--cue)}
+.pane{display:flex;flex-direction:column;gap:18px;padding-top:16px}
+
+/* monitor */
+.mon{position:relative;height:clamp(230px,44vh,420px);border-radius:14px;background:#000;overflow:hidden;touch-action:none;cursor:ns-resize;
+  box-shadow:inset 0 0 0 1px var(--line)}
+#mini{position:absolute;inset:0;overflow:hidden;-webkit-mask-image:linear-gradient(transparent,#000 18%,#000 72%,transparent);mask-image:linear-gradient(transparent,#000 18%,#000 72%,transparent)}
+#miniIn{position:absolute;left:0;right:0;top:0;padding:0 22px;will-change:transform}
+#miniIn p{margin:0 0 .7em;font-family:var(--f-read);font-weight:700;font-size:20px;line-height:1.36;color:#7d838b;overflow-wrap:break-word;transition:color .4s}
+#miniIn p.past{color:#34373d}
+#miniIn p.now{color:#fff}
+.mon .mark{position:absolute;left:0;right:0;top:40%;height:0;pointer-events:none}
+.mon .mark::before,.mon .mark::after{content:"";position:absolute;top:-8px;border:8px solid transparent}
+.mon .mark::before{left:0;border-left-color:var(--cue)}
+.mon .mark::after{right:0;border-right-color:var(--cue)}
+.mon .onair{position:absolute;left:12px;top:12px;font-stretch:125%;font-size:10px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;background:var(--live);color:#fff;padding:4px 8px;border-radius:3px;pointer-events:none}
+.mon .clock{position:absolute;right:14px;bottom:12px;text-align:right;pointer-events:none;display:flex;flex-direction:column;gap:2px}
+.mon .clock .rem{font-size:30px;color:var(--cue);line-height:1}
+.mon .clock .el{font-size:13px;color:var(--muted)}
+.mon .mcount{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-stretch:62%;font-weight:800;font-size:150px;color:var(--cue);background:rgba(0,0,0,.6);pointer-events:none}
+.mon .note{position:absolute;left:12px;right:96px;bottom:12px;font-size:12px;color:var(--cue);line-height:1.35;pointer-events:none}
+.mon .prog{position:absolute;left:0;bottom:0;height:2px;background:var(--cue);width:0;opacity:.8}
+
+/* transporte */
+.transport{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;justify-items:center;gap:10px;padding-block:4px}
+.jog{width:64px;height:64px;border-radius:50%;border:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;font-size:22px;line-height:1}
+.jog span{font-stretch:125%;font-size:9px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.jog:active{background:#1b1d22}
+.jog:disabled,#play:disabled{opacity:.35}
+#play{width:112px;height:112px;border-radius:50%;background:#101114;border:3px solid var(--dim);display:flex;align-items:center;justify-content:center;font-size:40px;color:var(--fg);
+  box-shadow:0 0 0 6px var(--bg),0 0 0 7px var(--line);transition:border-color .2s,background .2s,box-shadow .2s}
+#play[data-s="ready"]{border-color:var(--ready);box-shadow:0 0 0 6px var(--bg),0 0 0 7px var(--line),0 0 28px rgba(52,210,123,.25)}
+#play[data-s="cue"]{border-color:var(--cue);background:var(--cue);color:#1b1200}
+#play[data-s="live"]{border-color:var(--live);background:var(--live);color:#fff;box-shadow:0 0 0 6px var(--bg),0 0 0 7px var(--line),0 0 34px rgba(255,59,48,.4)}
+#play:active{transform:scale(.97)}
+
+/* fader */
+.fader{display:flex;flex-direction:column;gap:8px}
+.fader .row{display:flex;justify-content:space-between;align-items:baseline}
+.fader .val{font-family:var(--f-tc);font-size:22px}
+.fader .ppm{font-size:12px;color:var(--muted)}
+input.fd{-webkit-appearance:none;appearance:none;width:100%;height:46px;margin:0;background:transparent;touch-action:none}
+input.fd::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(90deg,var(--cue) var(--p,25%),#26282e var(--p,25%))}
+input.fd::-moz-range-track{height:6px;border-radius:3px;background:#26282e}
+input.fd::-moz-range-progress{height:6px;border-radius:3px;background:var(--cue)}
+input.fd::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:42px;margin-top:-18px;border-radius:5px;border:1px solid #3c3f46;background:linear-gradient(#2c2f35,#1b1d21 46%,#d9d9d6 46%,#d9d9d6 54%,#1b1d21 54%,#25282d)}
+input.fd::-moz-range-thumb{width:24px;height:40px;border-radius:5px;border:1px solid #3c3f46;background:linear-gradient(#2c2f35,#1b1d21 46%,#d9d9d6 46%,#d9d9d6 54%,#1b1d21 54%,#25282d)}
+input.fd:disabled{opacity:.35}
+.ticks{display:flex;justify-content:space-between;padding:0 12px;margin-top:-6px}
+.ticks i{width:1px;height:6px;background:var(--dim)}
+.ticks i:nth-child(5n+1){height:9px;background:var(--muted)}
+
+.warn{border:1px solid #5a3a10;background:#1c1408;color:#f3d29a;border-radius:10px;padding:12px 14px;font-size:14px;line-height:1.45}
+
+/* ajustes */
+.list{display:flex;flex-direction:column}
+.set{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.set > span{font-size:15px}
+.step{display:flex;align-items:center;gap:4px}
+.step button{width:42px;height:42px;border-radius:50%;border:1px solid var(--line);background:var(--panel);font-size:20px}
+.step button:active{background:#1b1d22}
+.step button:disabled{opacity:.35}
+.step output{min-width:56px;text-align:center;font-family:var(--f-tc);font-size:18px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chips .key{padding:9px 12px}
+.chips .key[aria-pressed="true"]{border-color:var(--cue);color:var(--cue)}
+.sw{width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:#000;font-family:var(--f-read);font-weight:700;font-size:15px}
+.sw[aria-pressed="true"]{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--cue)}
+.sw:disabled{opacity:.35}
+
+/* roteiros */
+.inp{width:100%;box-sizing:border-box;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 13px;font-size:16px}
+textarea.inp{min-height:36vh;resize:vertical;font-family:var(--f-read);line-height:1.5}
+.two{display:grid;grid-template-columns:3fr 2fr;gap:8px}
+.est{font-family:var(--f-tc);font-size:13px;color:var(--muted);margin-top:-8px}
+.acts{display:flex;flex-wrap:wrap;gap:8px}
+.msg{font-size:14px;color:var(--cue);min-height:1.2em;margin-top:-6px}
+.libhead{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-top:10px;border-top:1px solid var(--line)}
+.lib{display:flex;flex-direction:column}
+.item{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)}
+.item .open{flex:1;min-width:0;text-align:left;display:flex;flex-direction:column;gap:3px}
+.item .open b{font-size:16px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .open span{font-size:12px;color:var(--muted);font-family:var(--f-tc)}
+.item.cur .open b{color:var(--cue)}
+.empty{padding:18px 0;color:var(--muted);line-height:1.5;font-size:14px}
+@media (prefers-reduced-motion:reduce){#hud,#play,#miniIn p{transition:none}}
+</style>
+</head>
+<body>
+
+<!-- INÍCIO -->
+<section id="home">
+  <button class="half" id="goP" type="button"><span class="silk">Câmera</span><b>Prompter</b><small>Fica no teleprompter e mostra o texto espelhado.</small></button>
+  <button class="half" id="goC" type="button"><span class="silk">Na sua mão</span><b>Controle</b><small>Comanda o prompter pelo código de 4 dígitos.</small></button>
+  <p class="foot"><i class="led" id="hLed"></i><span id="hTxt">Conectando…</span></p>
+</section>
+
+<!-- PROMPTER -->
+<section id="prompter" hidden>
+  <div id="stage">
+    <div id="scroll"></div>
+    <div id="guide"></div>
+    <div id="count" hidden></div>
+  </div>
+  <div id="pbar"></div>
+  <div id="pTally"></div>
+  <div id="hud">
+    <span class="grow"><i class="led" id="pLed"></i><span>Canal <b id="pCode">----</b></span><span id="pLink">· aguardando controle</span></span>
+    <button class="key" id="pPlay" type="button">Play</button>
+    <button class="key" id="pMirror" type="button"><i class="led"></i>Espelhar</button>
+    <button class="key" id="pFull" type="button">Tela cheia</button>
+    <button class="key" id="pExit" type="button">Sair</button>
+  </div>
+  <div id="wait" hidden>
+    <span class="silk">Código do canal</span>
+    <div class="bigcode" id="wCode">----</div>
+    <p>Digite no celular de controle.</p>
+    <div class="row">
+      <button class="key" id="wNew" type="button">Outro código</button>
+      <button class="key" id="wHide" type="button">Esconder</button>
+    </div>
+  </div>
+</section>
+
+<!-- CONTROLE -->
+<section id="ctl" hidden>
+  <div class="bar">
+    <i class="led" id="cLed"></i>
+    <span class="ch">Canal <b id="cCode">----</b></span>
+    <span class="grow" id="cLink"></span>
+    <button class="key" id="cSwap" type="button">Trocar</button>
+  </div>
+
+  <div id="pair">
+    <label class="silk" for="codeIn" style="text-align:center">Código que aparece no prompter</label>
+    <input class="codein" id="codeIn" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="0000">
+    <button class="key" id="codeLast" type="button" hidden></button>
+    <div id="noRoom" class="warn" hidden>Não foi possível carregar a conexão. Confira a internet e recarregue a página.</div>
+    <p>Abra este link no outro celular e toque em Prompter. Funciona melhor com os dois na mesma rede Wi-Fi.</p>
+  </div>
+
+  <div id="paired" hidden>
+    <nav class="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="live" aria-selected="true">Ao vivo</button>
+      <button type="button" role="tab" data-tab="rot" aria-selected="false">Roteiros</button>
+      <button type="button" role="tab" data-tab="adj" aria-selected="false">Ajustes</button>
+    </nav>
+
+    <!-- AO VIVO -->
+    <div class="pane" id="t-live">
+      <div id="perm" class="warn" hidden>Seu acesso a esta página não permite controlar. Peça ao dono acesso de Colaborador ou Editor.</div>
+      <div class="mon" id="mon" aria-label="Texto no prompter. Arraste para cima ou para baixo para buscar.">
+        <div id="mini"><div id="miniIn"></div></div>
+        <div class="mark"></div>
+        <span class="onair" id="onair" hidden>No ar</span>
+        <div class="clock"><span class="tc rem" id="tRem">--:--</span><span class="tc el" id="tEl"></span></div>
+        <div class="note" id="mismatch" hidden>O prompter está com outro texto. Envie o roteiro na aba Roteiros.</div>
+        <div class="mcount" id="mcount" hidden></div>
+        <div class="prog" id="mprog"></div>
+      </div>
+      <div class="transport">
+        <button class="jog" id="back" type="button" data-need aria-label="Voltar algumas linhas">⟲<span>Voltar</span></button>
+        <button id="play" type="button" data-need aria-label="Play"><span id="playIco">▶</span></button>
+        <button class="jog" id="fwd" type="button" data-need aria-label="Avançar algumas linhas">⟳<span>Avançar</span></button>
+      </div>
+      <div class="fader">
+        <div class="row"><label class="silk" for="spd">Velocidade</label><span><span class="ppm" id="ppm"></span> <span class="val" id="spdVal">–</span></span></div>
+        <input class="fd" type="range" id="spd" min="1" max="20" step="1" value="5" data-need>
+        <div class="ticks" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+    </div>
+
+    <!-- ROTEIROS -->
+    <div class="pane" id="t-rot" hidden>
+      <div class="two">
+        <input class="inp" id="edTitle" placeholder="Título" aria-label="Título">
+        <input class="inp" id="edClient" placeholder="Cliente" aria-label="Cliente ou projeto">
+      </div>
+      <textarea class="inp" id="edText" aria-label="Texto do roteiro" placeholder="Cole ou digite o roteiro. [PAUSA] e [SORRIR] viram deixas."></textarea>
+      <span class="est" id="est"></span>
+      <button class="key go" id="edSend" type="button" style="padding:16px">Enviar ao prompter</button>
+      <div class="acts">
+        <button class="key" id="edSave" type="button">Salvar</button>
+        <button class="key" id="edSaveNew" type="button" hidden>Salvar cópia</button>
+        <label class="key" for="edFile">Importar .txt</label>
+        <input type="file" id="edFile" accept=".txt,.md,text/plain" hidden>
+        <button class="key" id="aiOpen" type="button">IA</button>
+        <button class="key danger" id="edDel" type="button" hidden>Excluir</button>
+      </div>
+      <div class="acts" id="aiRow" hidden>
+        <button class="key" id="aiBreak" type="button">Quebrar frases</button>
+        <button class="key" id="aiSpeak" type="button">Deixar mais falado</button>
+        <button class="key" id="aiStop" type="button" hidden>Cancelar</button>
+        <button class="key" id="aiUndo" type="button" hidden>Desfazer</button>
+      </div>
+      <div class="acts" id="delRow" hidden>
+        <button class="key danger" id="delYes" type="button">Excluir de vez</button>
+        <button class="key" id="delNo" type="button">Cancelar</button>
+      </div>
+      <span class="msg" id="edMsg" role="status"></span>
+      <div class="libhead">
+        <span class="silk">Salvos</span>
+        <button class="key" id="edNew" type="button">Novo roteiro</button>
+      </div>
+      <input class="inp" id="libQ" type="search" placeholder="Buscar" aria-label="Buscar roteiro salvo">
+      <div class="lib" id="libList"></div>
+    </div>
+
+    <!-- AJUSTES -->
+    <div class="pane" id="t-adj" hidden>
+      <div class="list">
+        <div class="set"><span>Tamanho da letra</span><div class="step"><button type="button" id="fntDn" data-need aria-label="Diminuir letra">−</button><output id="fnt">–</output><button type="button" id="fntUp" data-need aria-label="Aumentar letra">+</button></div></div>
+        <div class="set"><span>Cor do texto</span><div class="chips" id="colors"></div></div>
+        <div class="set"><span>Margem lateral</span><div class="step"><button type="button" id="marDn" data-need aria-label="Diminuir margem">−</button><output id="mar">–</output><button type="button" id="marUp" data-need aria-label="Aumentar margem">+</button></div></div>
+        <div class="set"><span>Linha de leitura</span><div class="step"><button type="button" id="linUp" data-need aria-label="Subir linha de leitura">↑</button><output id="lin">–</output><button type="button" id="linDn" data-need aria-label="Descer linha de leitura">↓</button></div></div>
+        <div class="set"><span>Contagem no início</span><div class="chips"><button class="key" type="button" data-cd="0" data-need>Sem</button><button class="key" type="button" data-cd="3" data-need>3 s</button><button class="key" type="button" data-cd="5" data-need>5 s</button></div></div>
+        <div class="set"><span>Orientação</span><div class="chips"><button class="key" id="cMirror" type="button" data-need><i class="led"></i>Espelhar</button><button class="key" id="cFlip" type="button" data-need><i class="led"></i>Inverter</button></div></div>
+        <div class="set"><span>Voltar ao início do texto</span><button class="key" id="top" type="button" data-need>Início</button></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+(function(){
+const $=id=>document.getElementById(id);
+const clamp=(n,a,b)=>Math.min(b,Math.max(a,n));
+const ls={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+const SAMPLE="[EXEMPLO — troque pelo seu roteiro na aba Roteiros do controle]\nOlá! Este é um texto de teste do Prompter Remoto.\nNo celular do teleprompter, toque em Prompter. No celular da sua mão, toque em Controle e digite o código.\n[PAUSA]\nDo controle você dá play, ajusta a velocidade e volta algumas linhas quando errar.\nA seta âmbar na lateral marca a linha de leitura. Mantenha o olhar nela e fale com calma.\n[SORRIR]\nBoa gravação!";
+const COLORS=["#ffffff","#ffe14d","#a6ffbc","#94e6ff"], COLOR_NAMES=["Branco","Amarelo","Verde","Ciano"];
+const WPM=150;
+const KEY={speed:"sp",font:"fn",mirror:"mi",flipv:"fv",color:"co",margin:"ma",line:"li",cd:"cd"};
+
+/* ---------- texto ---------- */
+function paras(t){return t.split(/\n/).map(s=>s.trim()).filter(Boolean)}
+/* cada palavra vira um span: os dois aparelhos numeram as palavras igual e sincronizam pela palavra na linha de leitura */
+function fillParas(box,text){
+  box.textContent="";
+  paras(text).forEach(par=>{
+    const p=document.createElement("p");
+    par.split(/(\[[^\]]*\])/).forEach(seg=>{
+      if(!seg) return;
+      if(/^\[[^\]]*\]$/.test(seg)){const s=document.createElement("span");s.className="cue w";s.textContent=seg;p.append(s," ")}
+      else seg.split(/\s+/).forEach(t=>{if(!t)return;const s=document.createElement("span");s.className="w";s.textContent=t;p.append(s," ")});
+    });
+    box.appendChild(p);
+  });
+}
+function measureLines(box){
+  const out=[];let wi=0;
+  [...box.children].forEach((p,pi)=>{
+    p.querySelectorAll(".w").forEach(s=>{
+      const t=s.offsetTop,h=s.offsetHeight,L=out[out.length-1];
+      if(L&&L.p===pi&&Math.abs(L.top-t)<Math.max(3,L.h*.5))L.w1=wi+1;
+      else out.push({top:t,h,w0:wi,w1:wi+1,p:pi});
+      wi++;
+    });
+  });
+  for(let k=0;k<out.length;k++)out[k].span=k<out.length-1?out[k+1].top-out[k].top:out[k].h;
+  return out;
+}
+function lineAtY(lines,y){let lo=0,hi=lines.length-1;while(lo<hi){const m=(lo+hi+1)>>1;if(lines[m].top<=y)lo=m;else hi=m-1}return lo}
+function wordAt(lines,y){if(!lines.length)return 0;const L=lines[lineAtY(lines,y)];return L.w0+clamp((y-L.top)/(L.span||1),0,1)*(L.w1-L.w0)}
+function lineAtW(lines,w){let lo=0,hi=lines.length-1;while(lo<hi){const m=(lo+hi+1)>>1;if(lines[m].w0<=w)lo=m;else hi=m-1}return lo}
+function yAtWord(lines,w){if(!lines.length)return 0;const L=lines[lineAtW(lines,w)];return L.top+clamp((w-L.w0)/((L.w1-L.w0)||1),0,1)*L.span}
+function words(t){return (t.replace(/\[[^\]]*\]/g," ").match(/\S+/g)||[]).length}
+function hash(t){let h=5381;for(let i=0;i<t.length;i++)h=(h*33+t.charCodeAt(i))|0;return (h>>>0).toString(36)}
+function fmt(sec,neg){sec=Math.max(0,Math.round(sec||0));const h=Math.floor(sec/3600),m=Math.floor(sec/60)%60,s=sec%60;const mm=String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");return (neg?"−":"")+(h?h+":"+mm:mm)}
+
+/* ---------- estado ---------- */
+let mode=null, room=null, db=null, user=null, sample=null, uid=null, connTried=false;
+let nroom=null, code=null, sessRef=null, unsubSess=null, seeded=false;
+let script=ls.get("pr_script",SAMPLE), scriptTitle=ls.get("pr_title","");
+let scriptHash=hash(script), wordCount=words(script);
+const S=Object.assign({speed:5,font:56,mirror:true,flipv:false,color:0,margin:8,line:33,cd:3},ls.get("pr_set",{}));
+S.playing=false;S.counting=0;S.pos=0;S.el=0;
+function saveSet(){ls.set("pr_set",{speed:S.speed,font:S.font,mirror:S.mirror,flipv:S.flipv,color:S.color,margin:S.margin,line:S.line,cd:S.cd})}
+
+/* ================= PROMPTER ================= */
+let offs=[], last=0, lastPres=0, presKey="", hudPinned=false, hudTimer=0;
+const vh=()=>$("prompter").clientHeight||innerHeight;
+const lineY=()=>vh()*S.line/100;
+const pxps=()=>S.speed*S.font*0.11;
+function maxPos(){return Math.max(0,$("scroll").scrollHeight-vh())}
+function clampPos(){S.pos=clamp(S.pos,0,maxPos())}
+function renderP(){fillParas($("scroll"),script);layoutP()}
+function layoutP(){
+  const box=$("scroll");
+  box.style.fontSize=S.font+"px";
+  box.style.color=COLORS[S.color]||COLORS[0];
+  box.style.paddingLeft="calc("+S.margin+"vw + env(safe-area-inset-left,0px))";
+  box.style.paddingRight="calc("+S.margin+"vw + env(safe-area-inset-right,0px))";
+  box.style.paddingTop=lineY()+"px";
+  box.style.paddingBottom=(vh()-lineY())+"px";
+  $("guide").style.top=S.line+"%";
+  offs=measureLines(box);
+  clampPos();paintP();
+}
+/* posição contínua em palavras: qual palavra está na linha de leitura agora */
+function where(){return wordAt(offs,S.pos+lineY())}
+function textH(){const L=offs[offs.length-1];return L?L.top+L.span-offs[0].top:0}
+function posFor(w){return yAtWord(offs,w)-lineY()}
+function keepPlace(fn){const w=where();fn();layoutP();S.pos=posFor(w);clampPos()}
+function paintP(){
+  $("scroll").style.transform="translate3d(0,"+(-S.pos)+"px,0)";
+  const st=$("stage");st.classList.toggle("mirror",S.mirror);st.classList.toggle("flipv",S.flipv);
+  const m=maxPos();$("pbar").style.width=(m?S.pos/m*100:0)+"%";
+  const running=S.playing||S.counting>0;
+  $("pTally").dataset.s=S.counting>0?"cue":S.playing?"live":"ready";
+  $("pPlay").textContent=running?"Pausar":"Play";
+  $("pMirror").classList.toggle("on",S.mirror);
+  $("hud").classList.toggle("hide",running&&!hudPinned);
+  const c=$("count");c.hidden=!(S.counting>0);if(S.counting>0)c.textContent=Math.ceil(S.counting);
+}
+function tick(t){
+  if(mode!=="prompter") return;
+  const dt=last?Math.min(.1,(t-last)/1000):0;last=t;
+  if(S.counting>0){S.counting-=dt;if(S.counting<=0){S.counting=0;S.playing=true}paintP()}
+  else if(S.playing){S.pos+=pxps()*dt;S.el+=dt;if(S.pos>=maxPos()){S.pos=maxPos();S.playing=false}paintP()}
+  if(t-lastPres>200){lastPres=t;pushPres()}
+  requestAnimationFrame(tick);
+}
+function pushPres(){
+  if(!nroom||mode!=="prompter") return;
+  const m=maxPos(),r=pxps(),tot=m/r;
+  const st={role:"prompter",pl:S.playing,ct:S.counting>0?Math.ceil(S.counting):0,sp:S.speed,fn:S.font,mi:S.mirror,fv:S.flipv,co:S.color,ma:S.margin,li:S.line,cd:S.cd,
+    w:Math.round(where()*1000)/1000,v:(S.playing?Math.round(r*10)/10:0),th:Math.round(textH()),
+    pr:m?Math.round(S.pos/m*1000)/1000:0,el:Math.floor(S.el),rem:Math.round((m-S.pos)/r),tot:Math.round(tot),wpm:tot>0?Math.round(wordCount/tot*60):0,h:scriptHash};
+  const k=JSON.stringify(st);if(k===presKey)return;presKey=k;
+  nroom.presence(st).catch(()=>{});
+}
+function start(){if(S.pos>=maxPos()-1){S.pos=0;S.el=0}if(S.cd>0&&S.pos<5)S.counting=S.cd;else S.playing=true}
+function apply(c){
+  if(!c||typeof c!=="object") return;
+  const n=Number(c.v),fin=isFinite(n);
+  switch(c.op){
+    case "toggle": if(S.playing||S.counting>0){S.playing=false;S.counting=0}else start(); break;
+    case "speed": if(fin)S.speed=clamp(Math.round(n),1,20); break;
+    case "font": if(fin)keepPlace(()=>S.font=clamp(Math.round(n),24,140)); break;
+    case "margin": if(fin)keepPlace(()=>S.margin=clamp(Math.round(n),0,30)); break;
+    case "line": if(fin)keepPlace(()=>S.line=clamp(Math.round(n),15,60)); break;
+    case "color": if(fin){S.color=clamp(Math.round(n),0,COLORS.length-1);layoutP()} break;
+    case "cd": if([0,3,5].includes(n))S.cd=n; break;
+    case "mirror": S.mirror=!!c.v; break;
+    case "flipv": S.flipv=!!c.v; break;
+    case "jump": if(fin)S.pos+=n*S.font*1.36*3; break;
+    case "seekw": if(fin)S.pos=posFor(n); break;
+    case "top": S.pos=0;S.playing=false;S.counting=0;S.el=0; break;
+    default: return;
+  }
+  clampPos();saveSet();paintP();pushPres();
+}
+function showHud(){hudPinned=true;paintP();clearTimeout(hudTimer);hudTimer=setTimeout(()=>{hudPinned=false;paintP()},3500)}
+function showCode(){$("pCode").textContent=code||"----";$("wCode").textContent=code||"----";$("cCode").textContent=code||"----"}
+
+addEventListener("keydown",e=>{
+  if(mode!=="prompter") return;
+  const k=e.key;
+  if(k===" "||k==="Enter"||k==="MediaPlayPause")apply({op:"toggle"});
+  else if(k==="ArrowUp"||k==="AudioVolumeUp")apply({op:"speed",v:S.speed+1});
+  else if(k==="ArrowDown"||k==="AudioVolumeDown")apply({op:"speed",v:S.speed-1});
+  else if(k==="PageUp"||k==="ArrowLeft")apply({op:"jump",v:-1});
+  else if(k==="PageDown"||k==="ArrowRight")apply({op:"jump",v:1});
+  else return;
+  e.preventDefault();
+});
+
+/* ================= CONTROLE ================= */
+let remote=null, hold={}, edDirty=false, libId=null, libDocs=[];
+function send(op,v){
+  const k=KEY[op],now=Date.now();
+  if(remote){
+    if(op==="speed"&&v!==remote.sp)rebaseSpeed(remote.sp,v);
+    if(k){remote[k]=v;hold[k]=now}
+    if(op==="toggle"){remote.pl=!(remote.pl||remote.ct>0);remote.ct=0;hold.pl=now;hold.ct=now}
+    renderCtl();
+  }
+  if(nroom) nroom.emit("cmd",{op,v}).catch(e=>{if(e&&e.code==="not_permitted")$("perm").hidden=false});
+}
+
+/* monitor do texto: anima localmente e só corrige com o que o prompter informa */
+/* trabalha em "palavras": a mesma palavra fica na seta nos dois aparelhos, mesmo com quebras de linha diferentes */
+/* O monitor rola sozinho em velocidade constante (a do prompter, na escala do texto pequeno).
+   A palavra que o prompter informa só corrige de leve, então não há pulos. */
+let mLines=[], base=null, dispY=0, dragging=false, dragY=0, lastIdx=-1, mRAF=0, mLast=0, seekT=0;
+const LEAD=.1; // compensa o atraso da rede (s)
+function renderMini(){
+  fillParas($("miniIn"),script);
+  mLines=measureLines($("miniIn"));lastIdx=-1;
+  if(remote)setBase(remote,true);
+  dispY=targetY(performance.now());paintMiniAt(dispY);startMini();
+}
+function remeasure(){mLines=measureLines($("miniIn"));if(remote)setBase(remote,true)}
+function miniH(){const L=mLines[mLines.length-1];return L?L.top+L.span-mLines[0].top:0}
+function maxY(){const L=mLines[mLines.length-1];return L?L.top+L.span:0}
+function setBase(r,force){
+  if(!r||r.h!==scriptHash){base=null;return}
+  const w=+r.w||0,v=r.pl?(+r.v||0):0,th=+r.th||0;
+  if(!force&&base&&base.srcW===w&&base.srcV===v)return;
+  base={y:yAtWord(mLines,w),v,th,srcW:w,srcV:v,t:performance.now()};
+}
+function vMini(){return base&&base.th>0?base.v*miniH()/base.th:0}
+function targetY(now){if(!base)return 0;return clamp(base.y+vMini()*((now-base.t)/1000+(base.v?LEAD:0)),0,maxY())}
+function paintMiniAt(y){
+  const H=$("mini").clientHeight||240;
+  $("miniIn").style.transform="translate3d(0,"+(H*.4-y)+"px,0)";
+  const L=mLines.length?mLines[lineAtY(mLines,y+1)]:null,i=L?L.p:0;
+  if(i!==lastIdx){lastIdx=i;[...$("miniIn").children].forEach((p,k)=>{p.className=k<i?"past":k===i?"now":""})}
+}
+function miniLoop(t){
+  mRAF=0;
+  if(mode!=="controle"||$("t-live").hidden||$("paired").hidden)return;
+  const dt=mLast?Math.min(.1,(t-mLast)/1000):0;mLast=t;
+  if(!dragging){
+    const vm=vMini(),err=targetY(t)-dispY;
+    if(vm>0&&Math.abs(err)<90){
+      /* rodando: só ajusta o ritmo (no máximo 20%), nunca dá tranco */
+      dispY+=(vm+clamp(err*1.2,-.2*vm,.2*vm))*dt;
+    }else{
+      dispY+=vm*dt+err*(1-Math.exp(-dt*(Math.abs(err)>90?7:4)));
+    }
+  }
+  paintMiniAt(dispY);
+  mRAF=requestAnimationFrame(miniLoop);
+}
+function startMini(){if(!mRAF){mLast=0;mRAF=requestAnimationFrame(miniLoop)}}
+/* ao mexer na velocidade, o monitor já muda de ritmo sem esperar o prompter responder */
+function rebaseSpeed(oldSp,newSp){
+  if(!base||!base.v||!oldSp)return;
+  const now=performance.now();base.y=base.y+vMini()*(now-base.t)/1000;base.t=now;base.v=base.v*newSp/oldSp;base.srcV=-1;
+}
+function sendSeek(force){
+  const now=performance.now();if(!force&&now-seekT<90)return;seekT=now;
+  base={y:dispY,v:0,th:base?base.th:0,srcW:-1,srcV:-1,t:now};
+  send("seekw",Math.round(wordAt(mLines,dispY)*1000)/1000);
+}
+const mon=$("mon");
+mon.addEventListener("pointerdown",e=>{if(!remote)return;dragging=true;dragY=e.clientY;try{mon.setPointerCapture(e.pointerId)}catch(_){}});
+mon.addEventListener("pointermove",e=>{if(!dragging)return;const dy=e.clientY-dragY;dragY=e.clientY;dispY=clamp(dispY-dy*1.4,0,maxY());paintMiniAt(dispY);sendSeek(false)});
+const endDrag=()=>{if(!dragging)return;dragging=false;sendSeek(true)};
+mon.addEventListener("pointerup",endDrag);mon.addEventListener("pointercancel",endDrag);
+
+let fading=false, fadeT=0;
+function renderCtl(){
+  if(mode!=="controle") return;
+  const r=remote,has=!!r;
+  const st=has?(r.ct>0?"cue":r.pl?"live":"ready"):"off";
+  $("cLed").dataset.s=st;
+  $("cLink").textContent=!room?"Sem conexão":!nroom?(code?"Conectando…":""):has?(st==="live"?"No ar":st==="cue"?"Contagem":"Prompter conectado"):"Aguardando o prompter";
+  document.querySelectorAll("#ctl [data-need]").forEach(b=>b.disabled=!has);
+  $("colors").querySelectorAll("button").forEach(b=>b.disabled=!has);
+  $("play").dataset.s=st;
+  const run=has&&(r.pl||r.ct>0);
+  $("playIco").textContent=run?"❚❚":"▶";$("play").setAttribute("aria-label",run?"Pausar":"Play");
+  $("onair").hidden=st!=="live";
+  $("mcount").hidden=!(has&&r.ct>0);if(has&&r.ct>0)$("mcount").textContent=r.ct;
+  if(!has){$("tRem").textContent="--:--";$("tEl").textContent="";$("mprog").style.width="0";$("mismatch").hidden=true;return}
+  $("tRem").textContent=fmt(r.rem,true);$("tEl").textContent=fmt(r.el)+" de "+fmt(r.tot);
+  $("mprog").style.width=((r.pr||0)*100)+"%";
+  if(!fading){$("spd").value=r.sp;paintFader()}
+  $("ppm").textContent=r.wpm?("≈ "+r.wpm+" pal/min ·"):"";
+  $("fnt").textContent=r.fn;$("mar").textContent=r.ma+"%";$("lin").textContent=r.li+"%";
+  $("cMirror").classList.toggle("on",!!r.mi);$("cFlip").classList.toggle("on",!!r.fv);
+  $("colors").querySelectorAll("button").forEach((b,k)=>b.setAttribute("aria-pressed",String(k===r.co)));
+  document.querySelectorAll("[data-cd]").forEach(b=>b.setAttribute("aria-pressed",String(Number(b.dataset.cd)===r.cd)));
+  $("mismatch").hidden=!r.h||r.h===scriptHash;
+}
+function paintFader(){const s=$("spd");$("spdVal").textContent=s.value;s.style.setProperty("--p",((s.value-1)/19*100)+"%")}
+function onPeers(ch){
+  const ps=ch.peers;
+  if(mode==="controle"){
+    const pr=ps.find(p=>!p.sameTab&&p.presence&&p.presence.role==="prompter");
+    const now=Date.now(),prev=remote;
+    remote=pr?{...pr.presence}:null;
+    if(remote&&prev)for(const k in hold){if(now-hold[k]<900)remote[k]=prev[k]}
+    if(!dragging&&!(remote&&now-(hold.sp||0)<400))setBase(remote,false);
+    renderCtl();
+  }else if(mode==="prompter"){
+    const n=ps.filter(p=>!p.sameTab&&p.presence&&p.presence.role==="controle").length;
+    $("pLed").dataset.s=n?"ready":"";
+    $("pLink").textContent=n?"· controle conectado":"· aguardando controle";
+    if(n)$("wait").hidden=true;
+  }
+}
+
+/* ---------- roteiro ---------- */
+function setScript(t,title,reset){
+  if(typeof t!=="string") return;
+  script=t.trim()?t:SAMPLE;scriptTitle=title||"";scriptHash=hash(script);wordCount=words(script);
+  ls.set("pr_script",script);ls.set("pr_title",scriptTitle);
+  if(mode==="prompter"){if(reset){S.pos=0;S.playing=false;S.counting=0;S.el=0}renderP();pushPres()}
+  if(mode==="controle"){
+    renderMini();
+    const ta=$("edText");
+    if(!edDirty&&document.activeElement!==ta){ta.value=script;$("edTitle").value=scriptTitle;updEst()}
+    renderCtl();
+  }
+}
+const chunks={};
+function onChunk(m){
+  const d=m.data;if(!d||typeof d.id!=="string"||typeof d.part!=="string"||!(d.n>0)||!(d.n<200))return;
+  const c=chunks[d.id]||(chunks[d.id]={n:d.n,parts:[]});c.parts[d.i|0]=d.part;
+  if(c.parts.filter(x=>typeof x==="string").length===c.n){delete chunks[d.id];const t=c.parts.join("");if(t!==script)setScript(t,String(d.t||""),true)}
+}
+function onSess(s){
+  const d=s.exists?s.data():null;
+  if(d&&typeof d.text==="string"){if(d.text!==script)setScript(d.text,typeof d.title==="string"?d.title:"",true)}
+  else if(!s.exists&&mode==="prompter"&&!s.metadata.fromCache&&!seeded&&sessRef){seeded=true;sessRef.set({text:script,title:scriptTitle,updatedAt:Date.now()}).catch(()=>{})}
+}
+async function sendScript(text,title){
+  setScript(text,title,false);
+  if(sessRef){
+    try{await sessRef.set({text,title,updatedAt:Date.now()});return"ok"}
+    catch(e){if(e&&e.code==="quota_exceeded")return"quota"}
+  }
+  if(nroom){
+    const id=Math.random().toString(36).slice(2,9),size=1200,n=Math.max(1,Math.ceil(text.length/size));
+    for(let i=0;i<n;i++){try{await nroom.emit("script",{id,i,n,t:title.slice(0,80),part:text.slice(i*size,(i+1)*size)})}catch(e){if(e&&e.code==="not_permitted"){$("perm").hidden=false;return"perm"}}}
+    return"ok";
+  }
+  return"local";
+}
+function edMsg(t){$("edMsg").textContent=t}
+function updEst(){const w=words($("edText").value);$("est").textContent=w+" palavras · ≈ "+fmt(w/WPM*60)+" em fala natural"}
+
+/* ---------- biblioteca ---------- */
+let libCol=null;
+function startLib(){
+  if(libCol){renderLib();return}
+  try{
+    libCol=localCol();
+    libCol.orderBy("updatedAt","desc").limit(300).onSnapshot(s=>{libDocs=s.docs.map(d=>({id:d.id,...d.data()}));renderLib()},()=>{libCol=null;renderLib()});
+  }catch(e){libCol=null}
+  renderLib();
+}
+function renderLib(){
+  const box=$("libList");box.textContent="";
+  const empty=t=>{const e=document.createElement("div");e.className="empty";e.textContent=t;box.appendChild(e)};
+  if(!libCol){empty("Não foi possível abrir os roteiros salvos neste celular.");return}
+  const q=$("libQ").value.trim().toLowerCase();
+  const list=libDocs.filter(d=>!q||(String(d.titulo||"")+" "+String(d.cliente||"")).toLowerCase().includes(q));
+  if(!list.length){empty(libDocs.length?"Nada encontrado.":"Nenhum roteiro salvo ainda. Eles ficam guardados neste celular.");return}
+  list.forEach(d=>{
+    const txt=String(d.texto||""),w=words(txt);
+    const it=document.createElement("div");it.className="item"+(d.id===libId?" cur":"");
+    const open=document.createElement("button");open.type="button";open.className="open";
+    const b=document.createElement("b");b.textContent=d.titulo||"Sem título";
+    const meta=document.createElement("span");
+    const dt=d.updatedAt?new Date(d.updatedAt).toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"}):"";
+    meta.textContent=[d.cliente,fmt(w/WPM*60),dt].filter(Boolean).join(" · ");
+    open.append(b,meta);
+    open.onclick=()=>{loadEditor(d);$("t-rot").scrollIntoView({block:"start"});scrollTo({top:0})};
+    const go=document.createElement("button");go.type="button";go.className="key";go.textContent="Enviar";
+    go.onclick=async()=>{loadEditor(d);const r=await sendScript(txt,d.titulo||"");edDirty=false;if(r!=="local")tab("live");else edMsg("Sem conexão: carregado só neste aparelho")};
+    it.append(open,go);box.appendChild(it);
+  });
+}
+function loadEditor(d){
+  libId=d.id;$("edTitle").value=d.titulo||"";$("edClient").value=d.cliente||"";$("edText").value=String(d.texto||"");
+  edDirty=true;updEst();updSaveBtns();edMsg("");$("delRow").hidden=true;renderLib();
+}
+function updSaveBtns(){$("edSave").textContent=libId?"Salvar alterações":"Salvar";$("edSaveNew").hidden=!libId;$("edDel").hidden=!libId}
+async function saveLib(asNew){
+  if(!libCol){edMsg("Não foi possível salvar neste celular.");return}
+  const data={titulo:$("edTitle").value.trim()||(paras($("edText").value)[0]||"Sem título").slice(0,60),cliente:$("edClient").value.trim(),texto:$("edText").value.replace(/\r/g,""),updatedAt:Date.now()};
+  edMsg("Salvando…");
+  try{
+    if(libId&&!asNew)await libCol.doc(libId).set(data);
+    else{const ref=await libCol.add(data);libId=ref.id}
+    if(!$("edTitle").value.trim())$("edTitle").value=data.titulo;
+    updSaveBtns();edMsg("Salvo");renderLib();
+  }catch(e){edMsg(e&&e.code==="quota_exceeded"?"Biblioteca cheia ou roteiro grande demais.":"Não foi possível salvar. Tente de novo.")}
+}
+
+/* ---------- IA ---------- */
+let aiCtl=null,aiUndo=null;
+async function runAI(kind){
+  if(!sample||aiCtl) return;
+  const ta=$("edText"),src=ta.value.trim();
+  if(!src){edMsg("Escreva ou cole um roteiro primeiro.");return}
+  aiUndo=ta.value;aiCtl=new AbortController();busyAI(true);edMsg("Ajustando…");
+  const task=kind==="break"
+    ?"Quebre frases longas em frases curtas e fáceis de ler em voz alta. Mude o mínimo possível das palavras originais. Uma ideia por linha."
+    :"Reescreva para soar natural quando falado: frases curtas, ordem direta, palavras do dia a dia. Mantenha o tom, as informações e um tamanho parecido.";
+  const prompt="Você prepara roteiros para teleprompter em português do Brasil.\nTarefa: "+task+"\nRegras: não invente fatos nem acrescente informações; mantenha exatamente as marcações entre colchetes, como [PAUSA]; uma frase ou ideia curta por linha; sem títulos, sem markdown, sem aspas, sem comentários. Responda somente com o roteiro final.\n\nRoteiro:\n<<<\n"+src+"\n>>>";
+  try{
+    const res=await sample(prompt,{signal:aiCtl.signal,cache:false,onText:({text})=>{if(text){ta.value=text;updEst()}}});
+    ta.value=String(res.text||"").trim()||aiUndo;edDirty=true;updEst();$("aiUndo").hidden=false;
+    edMsg(res.truncated?"A resposta veio cortada. Confira o final.":"Pronto. Revise e envie.");
+  }catch(e){
+    ta.value=aiUndo;updEst();
+    if(aiCtl&&aiCtl.signal.aborted)edMsg("Ajuste cancelado.");
+    else if(e&&e.code==="not_granted"){$("aiOpen").hidden=true;$("aiRow").hidden=true;edMsg("A IA não foi liberada nesta tela.")}
+    else edMsg(e&&e.code==="rate_limited"?"Muitos pedidos seguidos. Espere um pouco.":"Não deu para ajustar agora. Tente de novo.");
+  }finally{aiCtl=null;busyAI(false)}
+}
+function busyAI(b){$("aiBreak").disabled=b;$("aiSpeak").disabled=b;$("aiStop").hidden=!b}
+
+/* ================= SESSÃO ================= */
+function newCode(){return String(1000+Math.floor(Math.random()*9000))}
+function leaveSession(){
+  if(unsubSess){try{unsubSess()}catch(e){}unsubSess=null}
+  sessRef=null;seeded=false;
+  if(nroom){const r=nroom;nroom=null;r.leave().catch(()=>{})}
+  remote=null;base=null;presKey="";
+}
+async function joinSession(){
+  leaveSession();
+  if(!code) return;
+  showCode();
+  if(db){try{sessRef=db.doc("sessoes/"+code);unsubSess=sessRef.onSnapshot(onSess,()=>{})}catch(e){sessRef=null}}
+  if(!room){renderCtl();return}
+  const want=code;let r;
+  try{r=await room.join("pr-"+code)}catch(e){
+    if(mode==="prompter"&&e&&e.type==="unavailable-id"&&code===want){code=newCode();ls.set("pr_code",code);return joinSession()}
+    renderCtl();
+    if(mode==="controle")$("cLink").textContent="Sem conexão. Confira a internet e toque em Trocar.";
+    if(mode==="prompter"){$("pLink").textContent="· sem conexão, tentando de novo";setTimeout(()=>{if(mode==="prompter"&&code===want&&!nroom)joinSession()},4000)}
+    return;
+  }
+  if(!mode||code!==want){r.leave().catch(()=>{});return}
+  nroom=r;
+  r.on("cmd",m=>{if(mode==="prompter")apply(m.data)},()=>{});
+  r.on("script",onChunk,()=>{});
+  r.onPeers(onPeers,()=>{});
+  r.presence({role:mode}).catch(()=>{});
+  if(mode==="prompter")r.onJoin=id=>r.sendTo(id,"script",{id:Math.random().toString(36).slice(2,9),i:0,n:1,t:scriptTitle,part:script});
+  presKey="";
+  if(mode==="prompter")setTimeout(()=>{
+    if(nroom!==r) return;
+    const me=r.peers().find(p=>p.sameTab);
+    const dup=r.peers().some(p=>!p.sameTab&&p.presence&&p.presence.role==="prompter"&&me&&p.peer<me.peer);
+    if(dup){code=newCode();ls.set("pr_code",code);joinSession()}
+  },1500);
+  renderCtl();
+}
+
+/* ================= TELAS ================= */
+async function keepAwake(){try{if("wakeLock" in navigator&&document.visibilityState==="visible")await navigator.wakeLock.request("screen")}catch(e){}}
+document.addEventListener("visibilitychange",()=>{if(mode&&document.visibilityState==="visible")keepAwake()});
+
+function enter(m){
+  mode=m;
+  $("home").hidden=true;$("prompter").hidden=m!=="prompter";$("ctl").hidden=m!=="controle";
+  try{history.replaceState(null,"","#"+m)}catch(e){}
+  keepAwake();
+  if(m==="prompter"){
+    code=ls.get("pr_code",null)||newCode();ls.set("pr_code",code);
+    $("wait").hidden=false;renderP();last=0;requestAnimationFrame(tick);showHud();joinSession();
+  }else{
+    $("edText").value=script;$("edTitle").value=scriptTitle;updEst();updSaveBtns();
+    showPair();
+  }
+}
+function showPair(){
+  leaveSession();code=null;showCode();
+  $("pair").hidden=false;$("paired").hidden=true;
+  const lastC=ls.get("pr_last",null);
+  $("codeLast").hidden=!lastC;if(lastC)$("codeLast").textContent="Último canal: "+lastC;
+  $("noRoom").hidden=!(connTried&&!room);
+  $("codeIn").value="";renderCtl();
+}
+function pairWith(c){
+  if(!/^\d{4}$/.test(c))return;
+  code=c;ls.set("pr_last",c);
+  $("codeIn").blur();
+  $("pair").hidden=true;$("paired").hidden=false;$("perm").hidden=true;
+  tab("live");joinSession();startLib();
+}
+function leave(){
+  leaveSession();mode=null;S.playing=false;S.counting=0;
+  $("home").hidden=false;$("prompter").hidden=true;$("ctl").hidden=true;
+  try{history.replaceState(null,"","#")}catch(e){}
+  try{if(document.fullscreenElement)document.exitFullscreen().catch(()=>{})}catch(e){}
+  updHome();
+}
+function tab(which){
+  document.querySelectorAll(".tabs [data-tab]").forEach(b=>b.setAttribute("aria-selected",String(b.dataset.tab===which)));
+  ["live","rot","adj"].forEach(t=>$("t-"+t).hidden=t!==which);
+  if(which==="live")renderMini();
+  if(which==="rot")renderLib();
+}
+function updHome(){
+  $("hLed").dataset.s=room?"ready":"";
+  $("hTxt").textContent=room?"Abra este mesmo link no outro celular.":connTried?"Não foi possível carregar a conexão. Confira a internet e recarregue.":"Carregando…";
+}
+
+/* ---------- eventos ---------- */
+$("goP").onclick=()=>enter("prompter");
+$("goC").onclick=()=>enter("controle");
+$("pExit").onclick=leave;
+$("cSwap").onclick=()=>{if($("paired").hidden)leave();else showPair()};
+$("stage").addEventListener("click",showHud);
+$("pPlay").onclick=()=>{apply({op:"toggle"});showHud()};
+$("pMirror").onclick=()=>{apply({op:"mirror",v:!S.mirror});showHud()};
+$("pFull").onclick=()=>{const el=document.documentElement;try{const r=document.fullscreenElement?document.exitFullscreen():(el.requestFullscreen||el.webkitRequestFullscreen).call(el);if(r&&r.catch)r.catch(()=>{})}catch(e){}};
+$("wNew").onclick=()=>{code=newCode();ls.set("pr_code",code);joinSession()};
+$("wHide").onclick=()=>{$("wait").hidden=true};
+addEventListener("resize",()=>{if(mode==="prompter")keepPlace(()=>{});if(mode==="controle"&&!$("t-live").hidden)remeasure()});
+
+$("codeIn").addEventListener("input",e=>{const v=e.target.value.replace(/\D/g,"").slice(0,4);e.target.value=v;if(v.length===4)pairWith(v)});
+$("codeLast").onclick=()=>pairWith(ls.get("pr_last",""));
+document.querySelectorAll(".tabs [data-tab]").forEach(b=>b.onclick=()=>tab(b.dataset.tab));
+
+$("play").onclick=()=>send("toggle");
+$("back").onclick=()=>send("jump",-1);
+$("fwd").onclick=()=>send("jump",1);
+$("top").onclick=()=>send("top");
+const spd=$("spd");
+spd.addEventListener("pointerdown",()=>fading=true);
+spd.addEventListener("input",()=>{fading=true;paintFader();const now=performance.now();if(now-fadeT>110){fadeT=now;send("speed",Number(spd.value))}});
+spd.addEventListener("change",()=>{send("speed",Number(spd.value));setTimeout(()=>fading=false,900)});
+$("fntDn").onclick=()=>remote&&send("font",clamp(remote.fn-6,24,140));
+$("fntUp").onclick=()=>remote&&send("font",clamp(remote.fn+6,24,140));
+$("marDn").onclick=()=>remote&&send("margin",clamp(remote.ma-2,0,30));
+$("marUp").onclick=()=>remote&&send("margin",clamp(remote.ma+2,0,30));
+$("linUp").onclick=()=>remote&&send("line",clamp(remote.li-5,15,60));
+$("linDn").onclick=()=>remote&&send("line",clamp(remote.li+5,15,60));
+$("cMirror").onclick=()=>remote&&send("mirror",!remote.mi);
+$("cFlip").onclick=()=>remote&&send("flipv",!remote.fv);
+document.querySelectorAll("[data-cd]").forEach(b=>b.onclick=()=>send("cd",Number(b.dataset.cd)));
+COLORS.forEach((c,k)=>{const b=document.createElement("button");b.type="button";b.className="sw";b.style.color=c;b.textContent="Aa";b.setAttribute("aria-label",COLOR_NAMES[k]);b.setAttribute("aria-pressed","false");b.onclick=()=>send("color",k);$("colors").appendChild(b)});
+
+$("edText").addEventListener("input",()=>{edDirty=true;updEst()});
+$("edTitle").addEventListener("input",()=>edDirty=true);
+$("edFile").addEventListener("change",e=>{
+  const f=e.target.files&&e.target.files[0];if(!f)return;
+  if(f.size>1e6){edMsg("Arquivo grande demais.");return}
+  const r=new FileReader();
+  r.onload=()=>{$("edText").value=String(r.result).replace(/\r/g,"");$("edTitle").value=f.name.replace(/\.[^.]+$/,"");$("edClient").value="";libId=null;updSaveBtns();edDirty=true;updEst();edMsg("Arquivo importado.")};
+  r.onerror=()=>edMsg("Não foi possível ler o arquivo.");
+  r.readAsText(f);e.target.value="";
+});
+$("edSend").onclick=async()=>{
+  const txt=$("edText").value.replace(/\r/g,"");edMsg("Enviando…");
+  const r=await sendScript(txt,$("edTitle").value.trim());
+  edDirty=false;
+  edMsg(r==="ok"?"Enviado ao prompter":r==="quota"?"Texto grande demais para enviar.":r==="perm"?"Seu acesso não permite enviar.":"Sem conexão: ficou só neste aparelho");
+};
+$("edSave").onclick=()=>saveLib(false);
+$("edSaveNew").onclick=()=>saveLib(true);
+$("edNew").onclick=()=>{libId=null;$("edTitle").value="";$("edClient").value="";$("edText").value="";edDirty=true;updEst();updSaveBtns();edMsg("");$("delRow").hidden=true;renderLib();$("edText").focus()};
+$("edDel").onclick=()=>{$("delRow").hidden=false};
+$("delNo").onclick=()=>{$("delRow").hidden=true};
+$("delYes").onclick=async()=>{if(!libCol||!libId)return;try{await libCol.doc(libId).delete();libId=null;updSaveBtns();edMsg("Roteiro excluído da biblioteca.")}catch(e){edMsg("Não foi possível excluir.")}$("delRow").hidden=true};
+$("aiOpen").onclick=()=>{$("aiRow").hidden=!$("aiRow").hidden;$("aiOpen").classList.toggle("on",!$("aiRow").hidden)};
+$("aiBreak").onclick=()=>runAI("break");
+$("aiSpeak").onclick=()=>runAI("speak");
+$("aiStop").onclick=()=>{if(aiCtl)aiCtl.abort()};
+$("aiUndo").onclick=()=>{if(aiUndo!=null){$("edText").value=aiUndo;updEst();$("aiUndo").hidden=true;edMsg("Texto anterior restaurado.")}};
+$("libQ").addEventListener("input",renderLib);
+
+/* ================= CONEXÃO (PeerJS: celular com celular, sem servidor próprio) ================= */
+const PREFIX="prompterremoto-v1-";
+function baseRoom(){
+  const L={topics:{},cbs:[],me:{peer:"me",sameTab:true,isMe:true,presence:{}},others:new Map()};
+  const r={
+    on(t,f){(L.topics[t]=L.topics[t]||[]).push(f);return()=>{}},
+    onPeers(f){L.cbs.push(f);setTimeout(fire,0);return()=>{}},
+    peers(){return[L.me,...L.others.values()]},
+  };
+  function fire(){const ps=r.peers();L.cbs.forEach(f=>{try{f({peers:ps,joined:[],left:[],updated:[]})}catch(e){}})}
+  function deliver(t,d,from){(L.topics[t]||[]).forEach(f=>{try{f({topic:t,data:d,peer:from,sameTab:false,isMe:false})}catch(e){}})}
+  function merge(p){const pr={...L.me.presence};for(const k in p){if(p[k]===null)delete pr[k];else pr[k]=p[k]}L.me={...L.me,presence:pr};return pr}
+  return{r,L,fire,deliver,merge};
+}
+function hostRoom(code){return new Promise((res,rej)=>{
+  const{r,L,fire,deliver,merge}=baseRoom(),conns=new Map();let done=false,closed=false;
+  const peer=new Peer(PREFIX+code,{debug:0});
+  peer.on("open",()=>{if(!done){done=true;res(r)}});
+  peer.on("error",e=>{if(!done){done=true;rej(e);try{peer.destroy()}catch(_){}}});
+  peer.on("disconnected",()=>{if(!closed)setTimeout(()=>{try{if(!closed&&peer.disconnected)peer.reconnect()}catch(_){}},1500)});
+  peer.on("connection",c=>{
+    c.on("open",()=>{conns.set(c.peer,c);L.others.set(c.peer,{peer:c.peer,sameTab:false,isMe:false,presence:{}});try{c.send({k:"p",d:L.me.presence})}catch(_){}fire();if(r.onJoin)r.onJoin(c.peer)});
+    c.on("data",m=>{if(!m||typeof m!=="object")return;if(m.k==="p"){L.others.set(c.peer,{peer:c.peer,sameTab:false,isMe:false,presence:m.d||{}});fire()}else if(m.k==="e")deliver(m.t,m.d,c.peer)});
+    const drop=()=>{if(conns.get(c.peer)===c){conns.delete(c.peer);L.others.delete(c.peer);fire()}};
+    c.on("close",drop);c.on("error",drop);
+  });
+  r.emit=(t,d)=>{conns.forEach(c=>{try{c.send({k:"e",t,d})}catch(_){}});return Promise.resolve()};
+  r.sendTo=(id,t,d)=>{const c=conns.get(id);if(c)try{c.send({k:"e",t,d})}catch(_){}};
+  r.presence=p=>{const pr=merge(p);conns.forEach(c=>{try{c.send({k:"p",d:pr})}catch(_){}});return Promise.resolve()};
+  r.leave=()=>{closed=true;try{peer.destroy()}catch(_){}return Promise.resolve()};
+  setTimeout(()=>{if(!done){done=true;rej({type:"timeout"});try{peer.destroy()}catch(_){}}},15000);
+})}
+function clientRoom(code){return new Promise((res,rej)=>{
+  const{r,L,fire,deliver,merge}=baseRoom();let conn=null,closed=false,retryT=0,done=false,trying=false;
+  const peer=new Peer({debug:0});
+  function retry(ms){clearTimeout(retryT);retryT=setTimeout(connect,ms)}
+  function connect(){
+    if(closed||trying||(conn&&conn.open)||!peer.open)return;
+    trying=true;
+    const c=peer.connect(PREFIX+code,{reliable:true});
+    const giveUp=setTimeout(()=>{if(!c.open){trying=false;try{c.close()}catch(_){}retry(1500)}},8000);
+    c.on("open",()=>{clearTimeout(giveUp);trying=false;conn=c;try{c.send({k:"p",d:L.me.presence})}catch(_){}});
+    c.on("data",m=>{if(!m||typeof m!=="object")return;if(m.k==="p"){L.others.set("host",{peer:"host",sameTab:false,isMe:false,presence:m.d||{}});fire()}else if(m.k==="e")deliver(m.t,m.d,"host")});
+    const drop=()=>{clearTimeout(giveUp);trying=false;if(conn===c||!conn){conn=null;L.others.delete("host");fire();retry(2000)}};
+    c.on("close",drop);c.on("error",drop);
+  }
+  peer.on("open",()=>{if(!done){done=true;res(r)}connect()});
+  peer.on("error",e=>{
+    if(e&&e.type==="peer-unavailable"){trying=false;retry(2500);return}
+    if(!done){done=true;rej(e);try{peer.destroy()}catch(_){}}
+  });
+  peer.on("disconnected",()=>{if(!closed)setTimeout(()=>{try{if(!closed&&peer.disconnected)peer.reconnect()}catch(_){}},1500)});
+  r.emit=(t,d)=>{if(conn&&conn.open)try{conn.send({k:"e",t,d})}catch(_){}return Promise.resolve()};
+  r.presence=p=>{const pr=merge(p);if(conn&&conn.open)try{conn.send({k:"p",d:pr})}catch(_){}return Promise.resolve()};
+  r.leave=()=>{closed=true;clearTimeout(retryT);try{peer.destroy()}catch(_){}return Promise.resolve()};
+  setTimeout(()=>{if(!done){done=true;rej({type:"timeout"});try{peer.destroy()}catch(_){}}},15000);
+})}
+/* biblioteca salva no próprio celular */
+function localCol(){
+  const K="pr_lib",subs=[],all=()=>{const a=ls.get(K,[]);return Array.isArray(a)?a:[]};
+  const snap=()=>{const a=all().slice().sort((x,y)=>(y.updatedAt||0)-(x.updatedAt||0));return{docs:a.map(d=>({id:d.id,data:()=>{const o={...d};delete o.id;return o}}))}};
+  const save=a=>{try{localStorage.setItem(K,JSON.stringify(a))}catch(e){throw{code:"quota_exceeded"}}const s=snap();subs.forEach(f=>f(s))};
+  const col={
+    doc(id){return{id,async set(data){const a=all().filter(d=>d.id!==id);a.push({...data,id});save(a)},async delete(){save(all().filter(d=>d.id!==id))}}},
+    async add(data){const id="r"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);await col.doc(id).set(data);return{id}},
+    orderBy(){return col},limit(){return col},
+    onSnapshot(f){subs.push(f);setTimeout(()=>f(snap()),0);return()=>{}}
+  };
+  return col;
+}
+function connect(){
+  connTried=true;
+  if(typeof Peer!=="function"){room=null;updHome();if(mode==="controle")$("noRoom").hidden=false;return}
+  room={join(name){const c=name.replace(/^pr-/,"");return mode==="prompter"?hostRoom(c):clientRoom(c)}};
+  $("aiOpen").hidden=true;
+  updHome();
+  if(mode&&code)joinSession();
+  if(mode==="controle"){$("noRoom").hidden=true;if(code)startLib();renderCtl()}
+}
+
+updHome();paintFader();
+try{document.fonts.ready.then(()=>{if(document.fonts.check('800 20px Archivo'))document.body.classList.add('fx')})}catch(e){}
+const h=(location.hash||"").slice(1);
+if(h==="prompter"||h==="controle")enter(h);
+setTimeout(connect,0);
+})();
+</script>
+
+</body>
+</html>
