@@ -216,8 +216,12 @@ textarea.inp{min-height:36vh;resize:vertical;font-family:var(--f-read);line-heig
 .brandbar img{height:38px;width:auto;display:block}
 .bar .blogo{height:22px;width:auto;display:block;flex:none}
 #wait .wlogo{height:52px;width:auto;display:block}
-#splash{position:fixed;inset:0;z-index:50;background:var(--bg);display:flex;align-items:center;justify-content:center;transition:opacity .45s;cursor:pointer}
-#splash img{width:min(78vw,440px);height:auto;max-width:100%}
+#splash{position:fixed;inset:0;z-index:50;background:#09080b;overflow:hidden;transition:opacity .5s;cursor:pointer}
+/* o vídeo é maior que a tela: as peças entram pelas bordas, sem corte visível. --L = tamanho final da logo */
+#splash video{position:absolute;left:50%;top:50%;--L:min(42vw,34vh,280px);width:calc(var(--L) * 6.04);height:auto;max-width:none;transform:translate(-49.84%,-53.43%)}
+#splash img{position:absolute;left:50%;top:50%;width:min(42vw,34vh,280px);height:auto;transform:translate(-50%,-50%);opacity:0}
+#splash img.show{animation:lgIn .9s cubic-bezier(.2,.8,.2,1) forwards}
+@keyframes lgIn{from{opacity:0;transform:translate(-50%,-50%) scale(.6) rotate(-90deg)}to{opacity:1;transform:translate(-50%,-50%) scale(1) rotate(0)}}
 #splash.out{opacity:0;pointer-events:none}
 @media (prefers-reduced-motion:reduce){#splash{display:none!important}}
 
@@ -226,7 +230,7 @@ textarea.inp{min-height:36vh;resize:vertical;font-family:var(--f-read);line-heig
 <body>
 
 <!-- INÍCIO -->
-<div id="splash" hidden aria-hidden="true"><img id="splashImg" alt=""></div>
+<div id="splash" hidden aria-hidden="true"><video id="splashVid" muted playsinline preload="auto" disablepictureinpicture></video><img id="splashImg" alt=""></div>
 
 <section id="home">
   <div class="brandbar"><img data-logo alt="Logo"></div>
@@ -981,14 +985,22 @@ function connect(){
 
 updHome();paintFader();
 /* logo e abertura animada */
-const LOGO_SRC="logo.png", ANIM_SRC="logo-anim.webp";
+const LOGO_SRC="logo.png", INTRO_SRC="logo-intro.mp4";
 document.querySelectorAll("img[data-logo]").forEach(i=>i.src=LOGO_SRC);
 (function splash(){
   let seen=false;try{seen=sessionStorage.getItem("pr_splash")==="1";sessionStorage.setItem("pr_splash","1")}catch(e){}
   if(seen||matchMedia("(prefers-reduced-motion: reduce)").matches)return;
-  const sp=$("splash");sp.hidden=false;$("splashImg").src=ANIM_SRC;
-  const close=()=>{sp.classList.add("out");setTimeout(()=>{sp.hidden=true},500)};
-  sp.addEventListener("click",close);setTimeout(close,2700);
+  const sp=$("splash"),v=$("splashVid");sp.hidden=false;
+  let closed=false;
+  const close=()=>{if(closed)return;closed=true;sp.classList.add("out");setTimeout(()=>{sp.hidden=true;try{v.pause();v.removeAttribute("src");v.load()}catch(e){}},550)};
+  /* se o celular não tocar o vídeo (ex.: modo economia), mostra a logo com uma entrada simples */
+  let fell=false;const fallback=()=>{if(fell||closed)return;fell=true;v.hidden=true;const im=$("splashImg");im.src=LOGO_SRC;im.classList.add("show");setTimeout(close,1500)};
+  v.muted=true;v.src=INTRO_SRC;
+  v.addEventListener("ended",()=>setTimeout(close,120));
+  v.addEventListener("error",fallback);
+  try{const pr=v.play();if(pr&&pr.catch)pr.catch(fallback)}catch(e){fallback()}
+  sp.addEventListener("click",close);
+  setTimeout(close,5000);
 })();
 
 try{document.fonts.ready.then(()=>{if(document.fonts.check('800 20px Archivo'))document.body.classList.add('fx')})}catch(e){}
