@@ -338,6 +338,7 @@ textarea.inp{min-height:36vh;resize:vertical;font-family:var(--f-read);line-heig
       <div class="list">
         <div class="set"><span>Tamanho da letra</span><div class="step"><button type="button" id="fntDn" data-need aria-label="Diminuir letra">−</button><output id="fnt">–</output><button type="button" id="fntUp" data-need aria-label="Aumentar letra">+</button></div></div>
         <div class="set"><span>Cor do texto</span><div class="chips" id="colors"></div></div>
+        <div class="set"><span>Alinhamento</span><div class="chips"><button class="key" type="button" data-al="left" data-need>Esquerda</button><button class="key" type="button" data-al="center" data-need>Centro</button></div></div>
         <div class="set"><span>Margem lateral</span><div class="step"><button type="button" id="marDn" data-need aria-label="Diminuir margem">−</button><output id="mar">–</output><button type="button" id="marUp" data-need aria-label="Aumentar margem">+</button></div></div>
         <div class="set"><span>Linha de leitura</span><div class="step"><button type="button" id="linUp" data-need aria-label="Subir linha de leitura">↑</button><output id="lin">–</output><button type="button" id="linDn" data-need aria-label="Descer linha de leitura">↓</button></div></div>
         <div class="set"><span>Contagem no início</span><div class="chips"><button class="key" type="button" data-cd="0" data-need>Sem</button><button class="key" type="button" data-cd="3" data-need>3 s</button><button class="key" type="button" data-cd="5" data-need>5 s</button></div></div>
@@ -356,7 +357,7 @@ const ls={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.par
 const SAMPLE="[EXEMPLO — troque pelo seu roteiro na aba Roteiros do controle]\nOlá! Este é um texto de teste do Prompter Remoto.\nNo celular do teleprompter, toque em Prompter. No celular da sua mão, toque em Controle e digite o código.\n[PAUSA]\nDo controle você dá play, ajusta a velocidade e volta algumas linhas quando errar.\nA seta âmbar na lateral marca a linha de leitura. Mantenha o olhar nela e fale com calma.\n[SORRIR]\nBoa gravação!";
 const COLORS=["#ffffff","#ffe14d","#a6ffbc","#94e6ff"], COLOR_NAMES=["Branco","Amarelo","Verde","Ciano"];
 const WPM=150;
-const KEY={speed:"sp",font:"fn",mirror:"mi",flipv:"fv",color:"co",margin:"ma",line:"li",cd:"cd"};
+const KEY={speed:"sp",font:"fn",mirror:"mi",flipv:"fv",color:"co",margin:"ma",line:"li",cd:"cd",align:"al"};
 
 /* ---------- texto ---------- */
 function paras(t){return t.split(/\n/).map(s=>s.trim()).filter(Boolean)}
@@ -399,9 +400,9 @@ let mode=null, room=null, db=null, user=null, sample=null, uid=null, connTried=f
 let nroom=null, code=null, sessRef=null, unsubSess=null, seeded=false;
 let script=ls.get("pr_script",SAMPLE), scriptTitle=ls.get("pr_title","");
 let scriptHash=hash(script), wordCount=words(script);
-const S=Object.assign({speed:5,font:56,mirror:true,flipv:false,color:0,margin:8,line:33,cd:3},ls.get("pr_set",{}));
+const S=Object.assign({speed:5,font:56,mirror:true,flipv:false,color:0,margin:8,line:33,cd:3,align:"left"},ls.get("pr_set",{}));
 S.playing=false;S.counting=0;S.pos=0;S.el=0;
-function saveSet(){ls.set("pr_set",{speed:S.speed,font:S.font,mirror:S.mirror,flipv:S.flipv,color:S.color,margin:S.margin,line:S.line,cd:S.cd})}
+function saveSet(){ls.set("pr_set",{speed:S.speed,font:S.font,mirror:S.mirror,flipv:S.flipv,color:S.color,margin:S.margin,line:S.line,cd:S.cd,align:S.align})}
 
 /* ================= PROMPTER ================= */
 let offs=[], last=0, lastPres=0, presKey="", hudPinned=false, hudTimer=0;
@@ -415,6 +416,7 @@ function layoutP(){
   const box=$("scroll");
   box.style.fontSize=S.font+"px";
   box.style.color=COLORS[S.color]||COLORS[0];
+  box.style.textAlign=S.align==="center"?"center":"left";
   box.style.paddingLeft="calc("+S.margin+"vw + env(safe-area-inset-left,0px))";
   box.style.paddingRight="calc("+S.margin+"vw + env(safe-area-inset-right,0px))";
   box.style.paddingTop=lineY()+"px";
@@ -450,7 +452,7 @@ function tick(t){
 function pushPres(){
   if(!nroom||mode!=="prompter") return;
   const m=maxPos(),r=pxps(),tot=m/r;
-  const st={role:"prompter",pl:S.playing,ct:S.counting>0?Math.ceil(S.counting):0,sp:S.speed,fn:S.font,mi:S.mirror,fv:S.flipv,co:S.color,ma:S.margin,li:S.line,cd:S.cd,
+  const st={role:"prompter",pl:S.playing,ct:S.counting>0?Math.ceil(S.counting):0,sp:S.speed,fn:S.font,mi:S.mirror,fv:S.flipv,co:S.color,ma:S.margin,li:S.line,cd:S.cd,al:S.align,
     w:Math.round(where()*1000)/1000,v:(S.playing?Math.round(r*10)/10:0),th:Math.round(textH()),
     pr:m?Math.round(S.pos/m*1000)/1000:0,el:Math.floor(S.el),rem:Math.round((m-S.pos)/r),tot:Math.round(tot),wpm:tot>0?Math.round(wordCount/tot*60):0,h:scriptHash};
   const k=JSON.stringify(st);if(k===presKey)return;presKey=k;
@@ -468,6 +470,7 @@ function apply(c){
     case "line": if(fin)keepPlace(()=>S.line=clamp(Math.round(n),15,60)); break;
     case "color": if(fin){S.color=clamp(Math.round(n),0,COLORS.length-1);layoutP()} break;
     case "cd": if([0,3,5].includes(n))S.cd=n; break;
+    case "align": keepPlace(()=>S.align=c.v==="center"?"center":"left"); break;
     case "mirror": S.mirror=!!c.v; break;
     case "flipv": S.flipv=!!c.v; break;
     case "jump": if(fin)S.pos+=n*S.font*1.36*3; break;
@@ -590,6 +593,9 @@ function renderCtl(){
   $("cMirror").classList.toggle("on",!!r.mi);$("cFlip").classList.toggle("on",!!r.fv);
   $("colors").querySelectorAll("button").forEach((b,k)=>b.setAttribute("aria-pressed",String(k===r.co)));
   document.querySelectorAll("[data-cd]").forEach(b=>b.setAttribute("aria-pressed",String(Number(b.dataset.cd)===r.cd)));
+  const al=r.al==="center"?"center":"left";
+  document.querySelectorAll("[data-al]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.al===al)));
+  if($("miniIn").style.textAlign!==al)$("miniIn").style.textAlign=al;
   $("mismatch").hidden=!r.h||r.h===scriptHash;
 }
 function paintFader(){const s=$("spd");$("spdVal").textContent=s.value;s.style.setProperty("--p",((s.value-1)/19*100)+"%")}
@@ -846,6 +852,7 @@ $("linDn").onclick=()=>remote&&send("line",clamp(remote.li+5,15,60));
 $("cMirror").onclick=()=>remote&&send("mirror",!remote.mi);
 $("cFlip").onclick=()=>remote&&send("flipv",!remote.fv);
 document.querySelectorAll("[data-cd]").forEach(b=>b.onclick=()=>send("cd",Number(b.dataset.cd)));
+document.querySelectorAll("[data-al]").forEach(b=>b.onclick=()=>send("align",b.dataset.al));
 COLORS.forEach((c,k)=>{const b=document.createElement("button");b.type="button";b.className="sw";b.style.color=c;b.textContent="Aa";b.setAttribute("aria-label",COLOR_NAMES[k]);b.setAttribute("aria-pressed","false");b.onclick=()=>send("color",k);$("colors").appendChild(b)});
 
 $("edText").addEventListener("input",()=>{edDirty=true;updEst()});
