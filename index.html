@@ -64,7 +64,7 @@ button{cursor:pointer;touch-action:manipulation;background:none;border:0;padding
 .key.on .led{background:var(--cue);box-shadow:0 0 6px var(--cue)}
 
 /* ---------- início ---------- */
-#home{height:100%;display:grid;grid-template-rows:1fr 1fr auto;margin-inline:calc(-1*max(16px,env(safe-area-inset-left,0px))) calc(-1*max(16px,env(safe-area-inset-right,0px)))}
+#home{height:100%;display:grid;grid-template-rows:auto 1fr 1fr auto;margin-inline:calc(-1*max(16px,env(safe-area-inset-left,0px))) calc(-1*max(16px,env(safe-area-inset-right,0px)))}
 .half{display:flex;flex-direction:column;justify-content:flex-end;gap:10px;text-align:left;border-bottom:1px solid var(--line);
   padding:24px max(20px,env(safe-area-inset-right,0px)) 26px max(20px,env(safe-area-inset-left,0px));position:relative;overflow:hidden}
 .half:active{background:#101114}
@@ -104,7 +104,7 @@ button{cursor:pointer;touch-action:manipulation;background:none;border:0;padding
 #hud .grow b{font-family:var(--f-tc);font-weight:400;color:var(--cue);font-size:15px;letter-spacing:.08em}
 #hud .key{padding:8px 11px;font-size:12px;background:rgba(18,19,23,.9)}
 #pbar{position:absolute;left:0;bottom:0;height:2px;background:var(--cue);width:0;opacity:.7}
-#wait{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(320px,calc(100% - 32px));box-sizing:border-box;text-align:center;display:flex;flex-direction:column;gap:14px;align-items:center}
+#wait{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(320px,calc(100% - 32px));box-sizing:border-box;text-align:center;display:flex;flex-direction:column;gap:14px;align-items:center;background:rgba(14,15,18,.96);border:1px solid var(--line);border-radius:16px;padding:22px 18px;box-shadow:0 20px 60px rgba(0,0,0,.6)}
 #wait .bigcode{font-family:var(--f-tc);font-size:76px;letter-spacing:.16em;color:var(--cue);line-height:1;padding-left:.16em}
 #wait p{margin:0;color:var(--muted);line-height:1.45}
 #wait .row{display:flex;gap:8px}
@@ -211,12 +211,25 @@ textarea.inp{min-height:36vh;resize:vertical;font-family:var(--f-read);line-heig
 .item.cur .open b{color:var(--cue)}
 .empty{padding:18px 0;color:var(--muted);line-height:1.5;font-size:14px}
 @media (prefers-reduced-motion:reduce){#hud,#play,#miniIn p{transition:none}}
+/* logo da empresa */
+.brandbar{display:flex;align-items:center;gap:10px;padding:calc(18px) max(20px,env(safe-area-inset-right,0px)) 0 max(20px,env(safe-area-inset-left,0px))}
+.brandbar img{height:38px;width:auto;display:block}
+.bar .blogo{height:22px;width:auto;display:block;flex:none}
+#wait .wlogo{height:52px;width:auto;display:block}
+#splash{position:fixed;inset:0;z-index:50;background:var(--bg);display:flex;align-items:center;justify-content:center;transition:opacity .45s;cursor:pointer}
+#splash img{width:min(78vw,440px);height:auto;max-width:100%}
+#splash.out{opacity:0;pointer-events:none}
+@media (prefers-reduced-motion:reduce){#splash{display:none!important}}
+
 </style>
 </head>
 <body>
 
 <!-- INÍCIO -->
+<div id="splash" hidden aria-hidden="true"><img id="splashImg" alt=""></div>
+
 <section id="home">
+  <div class="brandbar"><img data-logo alt="Logo"></div>
   <button class="half" id="goP" type="button"><span class="silk">Câmera</span><b>Prompter</b><small>Fica no teleprompter e mostra o texto espelhado.</small></button>
   <button class="half" id="goC" type="button"><span class="silk">Na sua mão</span><b>Controle</b><small>Comanda o prompter pelo código de 4 dígitos.</small></button>
   <p class="foot"><i class="led" id="hLed"></i><span id="hTxt">Conectando…</span></p>
@@ -239,6 +252,7 @@ textarea.inp{min-height:36vh;resize:vertical;font-family:var(--f-read);line-heig
     <button class="key" id="pExit" type="button">Sair</button>
   </div>
   <div id="wait" hidden>
+    <img class="wlogo" data-logo alt="Logo">
     <span class="silk">Código do canal</span>
     <div class="bigcode" id="wCode">----</div>
     <p>Digite no celular de controle.</p>
@@ -252,6 +266,7 @@ textarea.inp{min-height:36vh;resize:vertical;font-family:var(--f-read);line-heig
 <!-- CONTROLE -->
 <section id="ctl" hidden>
   <div class="bar">
+    <img class="blogo" data-logo alt="">
     <i class="led" id="cLed"></i>
     <span class="ch">Canal <b id="cCode">----</b></span>
     <span class="grow" id="cLink"></span>
@@ -965,6 +980,17 @@ function connect(){
 }
 
 updHome();paintFader();
+/* logo e abertura animada */
+const LOGO_SRC="logo.png", ANIM_SRC="logo-anim.webp";
+document.querySelectorAll("img[data-logo]").forEach(i=>i.src=LOGO_SRC);
+(function splash(){
+  let seen=false;try{seen=sessionStorage.getItem("pr_splash")==="1";sessionStorage.setItem("pr_splash","1")}catch(e){}
+  if(seen||matchMedia("(prefers-reduced-motion: reduce)").matches)return;
+  const sp=$("splash");sp.hidden=false;$("splashImg").src=ANIM_SRC;
+  const close=()=>{sp.classList.add("out");setTimeout(()=>{sp.hidden=true},500)};
+  sp.addEventListener("click",close);setTimeout(close,2700);
+})();
+
 try{document.fonts.ready.then(()=>{if(document.fonts.check('800 20px Archivo'))document.body.classList.add('fx')})}catch(e){}
 const h=(location.hash||"").slice(1);
 if(h==="prompter"||h==="controle")enter(h);
